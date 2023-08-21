@@ -37,7 +37,6 @@ pipeline {
                 	}
 			echo branch_nem	
 
-hola
                 }
             }
         }
