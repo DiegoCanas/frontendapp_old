@@ -25,7 +25,7 @@ pipeline {
     stages {
 	stage('Ramita pa'){
 		steps{
-			def branch_nem = scm.branches[0].name
+			def branch_nem = env.GIT_BRANCH[0].name
 			if (branch_nem.contains("*/master")) {
     			branch_nem = branch_nem.split("\\*/")[1]
     			}
