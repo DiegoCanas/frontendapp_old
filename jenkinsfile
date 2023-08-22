@@ -1,0 +1,490 @@
+pipeline {
+    agent {
+        kubernetes {
+        // Configura el entorno en el que se van a ejecutar las diferentes etapas de la pipeline, en este caso se va a utilizar Kubernetes
+        // Se define la configuración del pod a partir de spec
+            yaml '''
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  hostAliases:
+                  - ip: "192.168.2.80"
+                    hostnames:
+                    - "pre.jenkins.com"
+                  imagePullSecrets:
+                  - name: nexus-pre
+                  containers:
+                  - name: jnlp
+                    image: pre.docker.nexus.com/jnlp-custom:0.0.0
+                  - name: alpine-core
+                    image: pre.docker.nexus.com/alpine-core:0.0.0
+                    command:
+                    - cat
+                    tty: true
+            '''
+        }
+    }
+    stages {
+    // Definimos las diferentes etapas de la pipeline, tenemos una etapa principal donde se van a ir realizando los determinados pasos para su correcto funcionamiento.
+    // De forma general, hay una division por rama, esto se hace para detectar en que rama estamos, las operaciones comunes de las diferentes ramas se explicarán en la rama master, el resto en su propia rama.
+        stage('Principal') {
+            steps {
+                script {
+                    try {
+                        def currentBranch = env.GIT_BRANCH_NAME
+                        // ¿Que hace esta línea?
+                        // Obtiene el nombre de la rama en la que estamos, es sencillo puesto que existe la variable "env.GIT_BRANCH_NAME" que proporciona el multibranch
+                        echo "Estamos en la rama: ${currentBranch}"
+
+                        if (currentBranch == 'master') {
+                        // If básico para entrar en rama
+                            echo "Trabajamos en la rama master"
+
+                            def eventType = env.GITHUB_EVENT_NAME
+                            // Definimos una nueva variable llamada "eventType", esta nos proporciona información sobre el evento que ha desencadenado que se ejecute la pipeline.
+                            // ¿Porque nos interesa? -> Queremos ahora diferenciar entre si es un push o un pull para saber que hacer dependiendo del evento.
+
+                            if (eventType == 'push') {
+                                echo "Se ha detectado un push"
+                                // Lógica al hacer el push, ¿Que ha de incluir?
+                                // -> Crea una nueva version
+                                // -> Copia código del repo en Dockerfile y lo sube a Nexus
+                                // -> Desplegar con chart de Helm en Kubernetes el artefacto Docker
+
+
+                                // Hay que implementar la funcion que genere una nueva versión
+                                def version = generateVersion()
+
+                                // Creación del tag
+                                // Definimos la direccion del repo
+                                def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
+                                def token = "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"
+                                // "${version}" -> Versión actual del token
+                                def tagMessage = "Version ${version}"
+                                // Viene la chicha, definimos la funcion tagData, ¿que hace?
+                                // -> "ref": Esto más lo que va después define la versión actual
+                                // -> "sha": La analizamos
+                                        // -> "returnStdout: true": Asegura que la salida del comando se capture
+                                        // -> "trim()": Elimina cualquier espacio en blanco en la salida
+                                        // -> "git rev-parse HEAD": Se utiliza para obtener el valor del hash del commit actual a través de la función "sh"
+                                def tagData = [
+                                    ref: "refs/tags/v${version}",
+                                    sha: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                                ]
+                                //Lo siguiente configura una solicitud HTTP a la API de Github para crear un tag en el repositorio
+                                //Definimos variable response, almacena la solicitud HTTP que se realizará, es decir, la respuesta que se obtiene.
+                                // -> "acceptType: 'APPLICATION_JSON": Decimos que queremos recibir la respuesta en formato JSON
+                                // -> " contentType: 'APPLICATION_JSON": Decimos que la solicitud que se envia es en JSON
+                                // -> "httpMode: 'POST'": Indicamos que realizamos una solicitud POST a la URL específica, la solicitud post envia datos nuevos al servidor.
+                                // -> "groovy.json.JsonOutput.toJson(tagData)": Toma los datos que hemos almacenado previamente en "tagData" y los convierte en una representación JSON para enviarlos a la API de GitHub
+                                // -> "url: apiEndpoint": URL a donde se envia, apiEndpoint es la URL de la API de GitHub
+                                def response = httpRequest(
+                                    acceptType: 'APPLICATION_JSON',
+                                    contentType: 'APPLICATION_JSON',
+                                    customHeaders: [
+                                        Authorization: "Bearer ${token}"
+                                    ],
+                                    httpMode: 'POST',
+                                    requestBody: groovy.json.JsonOutput.toJson(tagData),
+                                    url: apiEndpoint
+                                )
+                                //Basicamente la variable response contiene la respuesta a la solicitud HTTP, va a proporcionar el tag creado
+                                echo "Tag creado: ${response.data.ref}"
+
+                                // Creacion del Dockerfile y copia del repositorio
+                                writeFile file: 'Dockerfile', text: '''
+                                    FROM node:alpine
+                                    WORKDIR /app
+                                    COPY . /app
+                                    # Add other Dockerfile instructions as needed
+                                '''
+
+                                // Build y push the la imagen de Docker a Nexus
+                                def dockerImageName = "pre.nexus.com/${JOB_NAME}:${version}"
+                                sh "docker build -t ${dockerImageName} ."
+                                sh "docker push ${dockerImageName}"
+
+                                // Add, commit and push the changes to the repository
+                                sh 'git config --global user.email "diego@gmail.com"'
+                                sh 'git config --global user.name "diegocanas"'
+                                sh 'git add .'
+                                sh 'git commit -m "Actualización de la imagen Docker"'
+                                sh 'git push origin master'
+
+                                // Despliegue del chart de Helm
+                                sh "helm upgrade --install my-app path/to/helm/chart -f path/to/values.yaml --set image.repository=$dockerImageName"
+                            } else if (eventType == 'pull_request') {
+                                echo "Se ha detectado un pull request"
+                                // Añadir logica
+                            } else if (eventType == 'merge_request') {
+                                echo "Se ha detectado una merge request"
+                                // Añadir logica
+
+                        } else if (currentBranch == 'develop') {
+                            echo "Trabajamos en la rama develop"
+
+                            if (eventType == 'push') {
+                                echo "Se ha detectado un push"
+                                // Lógica al hacer el push, ¿Que ha de incluir?
+                                // -> Crea una nueva version
+                                // -> Copia código del repo en Dockerfile y lo sube a Nexus
+                                // -> Desplegar con chart de Helm en Kubernetes el artefacto Docker
+
+
+                                // Hay que implementar la funcion que genere una nueva versión
+                                def version = generateVersion()
+
+                                // Creación del tag
+                                // Definimos la direccion del repo
+                                def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
+                                def token = "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"
+                                // "${version}" -> Versión actual del token
+                                def tagMessage = "Version ${version}"
+                                // Viene la chicha, definimos la funcion tagData, ¿que hace?
+                                // -> "ref": Esto más lo que va después define la versión actual
+                                // -> "sha": La analizamos
+                                        // -> "returnStdout: true": Asegura que la salida del comando se capture
+                                        // -> "trim()": Elimina cualquier espacio en blanco en la salida
+                                        // -> "git rev-parse HEAD": Se utiliza para obtener el valor del hash del commit actual a través de la función "sh"
+                                def tagData = [
+                                    ref: "refs/tags/v${version}",
+                                    sha: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                                ]
+                                //Lo siguiente configura una solicitud HTTP a la API de Github para crear un tag en el repositorio
+                                //Definimos variable response, almacena la solicitud HTTP que se realizará, es decir, la respuesta que se obtiene.
+                                // -> "acceptType: 'APPLICATION_JSON": Decimos que queremos recibir la respuesta en formato JSON
+                                // -> " contentType: 'APPLICATION_JSON": Decimos que la solicitud que se envia es en JSON
+                                // -> "httpMode: 'POST'": Indicamos que realizamos una solicitud POST a la URL específica, la solicitud post envia datos nuevos al servidor.
+                                // -> "groovy.json.JsonOutput.toJson(tagData)": Toma los datos que hemos almacenado previamente en "tagData" y los convierte en una representación JSON para enviarlos a la API de GitHub
+                                // -> "url: apiEndpoint": URL a donde se envia, apiEndpoint es la URL de la API de GitHub
+                                def response = httpRequest(
+                                    acceptType: 'APPLICATION_JSON',
+                                    contentType: 'APPLICATION_JSON',
+                                    customHeaders: [
+                                        Authorization: "Bearer ${token}"
+                                    ],
+                                    httpMode: 'POST',
+                                    requestBody: groovy.json.JsonOutput.toJson(tagData),
+                                    url: apiEndpoint
+                                )
+                                //Basicamente la variable response contiene la respuesta a la solicitud HTTP, va a proporcionar el tag creado
+                                echo "Tag creado: ${response.data.ref}"
+
+                                // Creacion del Dockerfile y copia del repositorio
+                                writeFile file: 'Dockerfile', text: '''
+                                    FROM node:alpine
+                                    WORKDIR /app
+                                    COPY . /app
+                                    # Add other Dockerfile instructions as needed
+                                '''
+
+                                // Build y push the la imagen de Docker a Nexus
+                                def dockerImageName = "pre.nexus.com/${JOB_NAME}:${version}"
+                                sh "docker build -t ${dockerImageName} ."
+                                sh "docker push ${dockerImageName}"
+
+                                // Add, commit and push the changes to the repository
+                                sh 'git config --global user.email "diego@gmail.com"'
+                                sh 'git config --global user.name "diegocanas"'
+                                sh 'git add .'
+                                sh 'git commit -m "Actualización de la imagen Docker"'
+                                sh 'git push origin master'
+
+                                // Despliegue del chart de Helm
+                                sh "helm upgrade --install my-app path/to/helm/chart -f path/to/values.yaml --set image.repository=$dockerImageName"
+                            } else if (eventType == 'pull_request') {
+                                echo "Se ha detectado un pull request"
+                                // Añadir logica
+                            } else if (eventType == 'merge_request') {
+                                echo "Se ha detectado una merge request"
+                                // Añadir logica
+
+                        } else if (currentBranch.startsWith('release/')) {
+                            echo "Trabajamos en la rama release"
+
+                            if (eventType == 'push') {
+                                echo "Se ha detectado un push"
+                                // Lógica al hacer el push, ¿Que ha de incluir?
+                                // -> Crea una nueva version
+                                // -> Copia código del repo en Dockerfile y lo sube a Nexus
+                                // -> Desplegar con chart de Helm en Kubernetes el artefacto Docker
+
+
+                                // Hay que implementar la funcion que genere una nueva versión
+                                def version = generateVersion()
+
+                                // Creación del tag
+                                // Definimos la direccion del repo
+                                def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
+                                def token = "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"
+                                // "${version}" -> Versión actual del token
+                                def tagMessage = "Version ${version}"
+                                // Viene la chicha, definimos la funcion tagData, ¿que hace?
+                                // -> "ref": Esto más lo que va después define la versión actual
+                                // -> "sha": La analizamos
+                                        // -> "returnStdout: true": Asegura que la salida del comando se capture
+                                        // -> "trim()": Elimina cualquier espacio en blanco en la salida
+                                        // -> "git rev-parse HEAD": Se utiliza para obtener el valor del hash del commit actual a través de la función "sh"
+                                def tagData = [
+                                    ref: "refs/tags/v${version}",
+                                    sha: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                                ]
+                                //Lo siguiente configura una solicitud HTTP a la API de Github para crear un tag en el repositorio
+                                //Definimos variable response, almacena la solicitud HTTP que se realizará, es decir, la respuesta que se obtiene.
+                                // -> "acceptType: 'APPLICATION_JSON": Decimos que queremos recibir la respuesta en formato JSON
+                                // -> " contentType: 'APPLICATION_JSON": Decimos que la solicitud que se envia es en JSON
+                                // -> "httpMode: 'POST'": Indicamos que realizamos una solicitud POST a la URL específica, la solicitud post envia datos nuevos al servidor.
+                                // -> "groovy.json.JsonOutput.toJson(tagData)": Toma los datos que hemos almacenado previamente en "tagData" y los convierte en una representación JSON para enviarlos a la API de GitHub
+                                // -> "url: apiEndpoint": URL a donde se envia, apiEndpoint es la URL de la API de GitHub
+                                def response = httpRequest(
+                                    acceptType: 'APPLICATION_JSON',
+                                    contentType: 'APPLICATION_JSON',
+                                    customHeaders: [
+                                        Authorization: "Bearer ${token}"
+                                    ],
+                                    httpMode: 'POST',
+                                    requestBody: groovy.json.JsonOutput.toJson(tagData),
+                                    url: apiEndpoint
+                                )
+                                //Basicamente la variable response contiene la respuesta a la solicitud HTTP, va a proporcionar el tag creado
+                                echo "Tag creado: ${response.data.ref}"
+
+                                // Creacion del Dockerfile y copia del repositorio
+                                writeFile file: 'Dockerfile', text: '''
+                                    FROM node:alpine
+                                    WORKDIR /app
+                                    COPY . /app
+                                    # Add other Dockerfile instructions as needed
+                                '''
+
+                                // Build y push the la imagen de Docker a Nexus
+                                def dockerImageName = "pre.nexus.com/${JOB_NAME}:${version}"
+                                sh "docker build -t ${dockerImageName} ."
+                                sh "docker push ${dockerImageName}"
+
+                                // Add, commit and push the changes to the repository
+                                sh 'git config --global user.email "diego@gmail.com"'
+                                sh 'git config --global user.name "diegocanas"'
+                                sh 'git add .'
+                                sh 'git commit -m "Actualización de la imagen Docker"'
+                                sh 'git push origin master'
+
+                                // Despliegue del chart de Helm
+                                sh "helm upgrade --install my-app path/to/helm/chart -f path/to/values.yaml --set image.repository=$dockerImageName"
+                            } else if (eventType == 'pull_request') {
+                                echo "Se ha detectado un pull request"
+                                // Añadir logica
+                            } else if (eventType == 'merge_request') {
+                                echo "Se ha detectado una merge request"
+                                // Añadir logica
+
+                        } else if (currentBranch.startsWith('hotfix/')) {
+                            echo "Trabajamos en la rama hotfix"
+
+                            if (eventType == 'push') {
+                                echo "Se ha detectado un push"
+                                // Lógica al hacer el push, ¿Que ha de incluir?
+                                // -> Crea una nueva version
+                                // -> Copia código del repo en Dockerfile y lo sube a Nexus
+                                // -> Desplegar con chart de Helm en Kubernetes el artefacto Docker
+
+
+                                // Hay que implementar la funcion que genere una nueva versión
+                                def version = generateVersion()
+
+                                // Creación del tag
+                                // Definimos la direccion del repo
+                                def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
+                                def token = "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"
+                                // "${version}" -> Versión actual del token
+                                def tagMessage = "Version ${version}"
+                                // Viene la chicha, definimos la funcion tagData, ¿que hace?
+                                // -> "ref": Esto más lo que va después define la versión actual
+                                // -> "sha": La analizamos
+                                        // -> "returnStdout: true": Asegura que la salida del comando se capture
+                                        // -> "trim()": Elimina cualquier espacio en blanco en la salida
+                                        // -> "git rev-parse HEAD": Se utiliza para obtener el valor del hash del commit actual a través de la función "sh"
+                                def tagData = [
+                                    ref: "refs/tags/v${version}",
+                                    sha: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                                ]
+                                //Lo siguiente configura una solicitud HTTP a la API de Github para crear un tag en el repositorio
+                                //Definimos variable response, almacena la solicitud HTTP que se realizará, es decir, la respuesta que se obtiene.
+                                // -> "acceptType: 'APPLICATION_JSON": Decimos que queremos recibir la respuesta en formato JSON
+                                // -> " contentType: 'APPLICATION_JSON": Decimos que la solicitud que se envia es en JSON
+                                // -> "httpMode: 'POST'": Indicamos que realizamos una solicitud POST a la URL específica, la solicitud post envia datos nuevos al servidor.
+                                // -> "groovy.json.JsonOutput.toJson(tagData)": Toma los datos que hemos almacenado previamente en "tagData" y los convierte en una representación JSON para enviarlos a la API de GitHub
+                                // -> "url: apiEndpoint": URL a donde se envia, apiEndpoint es la URL de la API de GitHub
+                                def response = httpRequest(
+                                    acceptType: 'APPLICATION_JSON',
+                                    contentType: 'APPLICATION_JSON',
+                                    customHeaders: [
+                                        Authorization: "Bearer ${token}"
+                                    ],
+                                    httpMode: 'POST',
+                                    requestBody: groovy.json.JsonOutput.toJson(tagData),
+                                    url: apiEndpoint
+                                )
+                                //Basicamente la variable response contiene la respuesta a la solicitud HTTP, va a proporcionar el tag creado
+                                echo "Tag creado: ${response.data.ref}"
+
+                                // Creacion del Dockerfile y copia del repositorio
+                                writeFile file: 'Dockerfile', text: '''
+                                    FROM node:alpine
+                                    WORKDIR /app
+                                    COPY . /app
+                                    # Add other Dockerfile instructions as needed
+                                '''
+
+                                // Build y push the la imagen de Docker a Nexus
+                                def dockerImageName = "pre.nexus.com/${JOB_NAME}:${version}"
+                                sh "docker build -t ${dockerImageName} ."
+                                sh "docker push ${dockerImageName}"
+
+                                // Add, commit and push the changes to the repository
+                                sh 'git config --global user.email "diego@gmail.com"'
+                                sh 'git config --global user.name "diegocanas"'
+                                sh 'git add .'
+                                sh 'git commit -m "Actualización de la imagen Docker"'
+                                sh 'git push origin master'
+
+                                // Despliegue del chart de Helm
+                                sh "helm upgrade --install my-app path/to/helm/chart -f path/to/values.yaml --set image.repository=$dockerImageName"
+                            } else if (eventType == 'pull_request') {
+                                echo "Se ha detectado un pull request"
+                                // Añadir logica
+                            } else if (eventType == 'merge_request') {
+                                echo "Se ha detectado una merge request"
+                                // Añadir logica
+
+                        } else if (currentBranch.startsWith('feature/')) {
+                            echo "Trabajamos en la rama feature"
+
+                            if (eventType == 'push') {
+                                echo "Se ha detectado un push"
+                                // Lógica al hacer el push, ¿Que ha de incluir?
+                                // -> Crea una nueva version
+                                // -> Copia código del repo en Dockerfile y lo sube a Nexus
+                                // -> Desplegar con chart de Helm en Kubernetes el artefacto Docker
+
+
+                                // Hay que implementar la funcion que genere una nueva versión
+                                def version = generateVersion()
+
+                                // Creación del tag
+                                // Definimos la direccion del repo
+                                def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
+                                def token = "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"
+                                // "${version}" -> Versión actual del token
+                                def tagMessage = "Version ${version}"
+                                // Viene la chicha, definimos la funcion tagData, ¿que hace?
+                                // -> "ref": Esto más lo que va después define la versión actual
+                                // -> "sha": La analizamos
+                                        // -> "returnStdout: true": Asegura que la salida del comando se capture
+                                        // -> "trim()": Elimina cualquier espacio en blanco en la salida
+                                        // -> "git rev-parse HEAD": Se utiliza para obtener el valor del hash del commit actual a través de la función "sh"
+                                def tagData = [
+                                    ref: "refs/tags/v${version}",
+                                    sha: sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                                ]
+                                //Lo siguiente configura una solicitud HTTP a la API de Github para crear un tag en el repositorio
+                                //Definimos variable response, almacena la solicitud HTTP que se realizará, es decir, la respuesta que se obtiene.
+                                // -> "acceptType: 'APPLICATION_JSON": Decimos que queremos recibir la respuesta en formato JSON
+                                // -> " contentType: 'APPLICATION_JSON": Decimos que la solicitud que se envia es en JSON
+                                // -> "httpMode: 'POST'": Indicamos que realizamos una solicitud POST a la URL específica, la solicitud post envia datos nuevos al servidor.
+                                // -> "groovy.json.JsonOutput.toJson(tagData)": Toma los datos que hemos almacenado previamente en "tagData" y los convierte en una representación JSON para enviarlos a la API de GitHub
+                                // -> "url: apiEndpoint": URL a donde se envia, apiEndpoint es la URL de la API de GitHub
+                                def response = httpRequest(
+                                    acceptType: 'APPLICATION_JSON',
+                                    contentType: 'APPLICATION_JSON',
+                                    customHeaders: [
+                                        Authorization: "Bearer ${token}"
+                                    ],
+                                    httpMode: 'POST',
+                                    requestBody: groovy.json.JsonOutput.toJson(tagData),
+                                    url: apiEndpoint
+                                )
+                                //Basicamente la variable response contiene la respuesta a la solicitud HTTP, va a proporcionar el tag creado
+                                echo "Tag creado: ${response.data.ref}"
+
+                                // Creacion del Dockerfile y copia del repositorio
+                                writeFile file: 'Dockerfile', text: '''
+                                    FROM node:alpine
+                                    WORKDIR /app
+                                    COPY . /app
+                                    # Add other Dockerfile instructions as needed
+                                '''
+
+                                // Build y push the la imagen de Docker a Nexus
+                                def dockerImageName = "pre.nexus.com/${JOB_NAME}:${version}"
+                                sh "docker build -t ${dockerImageName} ."
+                                sh "docker push ${dockerImageName}"
+
+                                // Add, commit and push the changes to the repository
+                                sh 'git config --global user.email "diego@gmail.com"'
+                                sh 'git config --global user.name "diegocanas"'
+                                sh 'git add .'
+                                sh 'git commit -m "Actualización de la imagen Docker"'
+                                sh 'git push origin master'
+
+                                // Despliegue del chart de Helm
+                                sh "helm upgrade --install my-app path/to/helm/chart -f path/to/values.yaml --set image.repository=$dockerImageName"
+                            } else if (eventType == 'pull_request') {
+                                echo "Se ha detectado un pull request"
+                                // Añadir logica
+                            } else if (eventType == 'merge_request') {
+                                echo "Se ha detectado una merge request"
+                                // Añadir logica
+
+                        } else {
+                            echo "No encuentro la rama"
+                        // Resto del código existente
+
+                    } catch (Exception e) {
+                        echo "Ha ocurrido un error: ${e.getMessage()}"
+                        currentBuild.result = 'FAILURE'
+
+                        echo "Rollback a la pipeline"
+
+                        // Eliminar el tag creado
+                        def tagVersion = generateVersion()
+                        def deleteTagApiEndpoint = "https://github.com/DiegoCanas/frontendapp/tags/v${tagVersion}"
+                        def deleteTagToken = "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"
+                        httpRequest(
+                            acceptType: 'APPLICATION_JSON',
+                            contentType: 'APPLICATION_JSON',
+                            customHeaders: [
+                                Authorization: "Bearer ${deleteTagToken}"
+                            ],
+                            httpMode: 'DELETE',
+                            url: deleteTagApiEndpoint
+                        )
+                        echo "Tag v${tagVersion} eliminado"
+
+                        // Eliminar artefactos generados (por ejemplo, imágenes Docker)
+                        sh "docker rmi pre.nexus.com/${JOB_NAME}:${tagVersion}"
+
+                        // Hacer un git reset al commit anterior
+                        sh "git reset --hard HEAD~1"
+
+                        error "Pipeline failed"
+                    }
+                }
+            }
+        }
+        // Otras etapas de la pipeline
+    }
+
+    post {
+        always {
+            // Limpieza o acciones finales que deben realizarse sin importar el resultado
+        }
+        success {
+            echo "Pipeline completed successfully"
+        }
+        failure {
+            echo "Pipeline failed"
+            // Agregar aquí acciones adicionales en caso de que el pipeline falle
+        }
+    }
+}
