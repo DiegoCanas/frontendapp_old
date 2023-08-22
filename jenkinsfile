@@ -58,7 +58,7 @@ pipeline {
                                 // Creación del tag
                                 // Definimos la direccion del repo
                                 def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
-                                def token = "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"
+                                def token = "TOKEN"
                                 // "${version}" -> Versión actual del token
                                 def tagMessage = "Version ${version}"
                                 // Viene la chicha, definimos la funcion tagData, ¿que hace?
@@ -137,7 +137,7 @@ pipeline {
                                 // Creación del tag
                                 // Definimos la direccion del repo
                                 def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
-                                def token = "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"
+                                def token = "TOKEN"
                                 // "${version}" -> Versión actual del token
                                 def tagMessage = "Version ${version}"
                                 // Viene la chicha, definimos la funcion tagData, ¿que hace?
@@ -216,7 +216,7 @@ pipeline {
                                 // Creación del tag
                                 // Definimos la direccion del repo
                                 def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
-                                def token = "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"
+                                def token = "TOKEN"
                                 // "${version}" -> Versión actual del token
                                 def tagMessage = "Version ${version}"
                                 // Viene la chicha, definimos la funcion tagData, ¿que hace?
@@ -295,7 +295,7 @@ pipeline {
                                 // Creación del tag
                                 // Definimos la direccion del repo
                                 def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
-                                def token = "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"
+                                def token = "TOKEN"
                                 // "${version}" -> Versión actual del token
                                 def tagMessage = "Version ${version}"
                                 // Viene la chicha, definimos la funcion tagData, ¿que hace?
@@ -374,7 +374,7 @@ pipeline {
                                 // Creación del tag
                                 // Definimos la direccion del repo
                                 def apiEndpoint = "https://github.com/DiegoCanas/frontendapp"
-                                def token = "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"
+                                def token = "TOKEN"
                                 // "${version}" -> Versión actual del token
                                 def tagMessage = "Version ${version}"
                                 // Viene la chicha, definimos la funcion tagData, ¿que hace?
@@ -449,7 +449,7 @@ pipeline {
                         // Eliminar el tag creado
                         def tagVersion = generateVersion()
                         def deleteTagApiEndpoint = "https://github.com/DiegoCanas/frontendapp/tags/v${tagVersion}"
-                        def deleteTagToken = "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"
+                        def deleteTagToken = "TOKEN"
                         httpRequest(
                             acceptType: 'APPLICATION_JSON',
                             contentType: 'APPLICATION_JSON',
