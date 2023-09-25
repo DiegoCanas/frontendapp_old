@@ -215,6 +215,9 @@ pipeline{
                     }
                 }
             }
+
+            // FASE 5
+/*
             stage('Helm') {
                 //Implementar quí despliegue de Helm
                 steps {
@@ -238,7 +241,7 @@ pipeline{
                         }
                     }
                 }
-            }
+            } */
         }
         post {
             always {
