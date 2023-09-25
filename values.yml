@@ -1,0 +1,158 @@
+wso2Username: ""
+wso2Password: ""
+
+jenkins:
+  image:
+    repository: "wso2/kubernetes-pipeline-jenkins"
+    tag: "1.1.0"
+  # Admin credentials of jenkins instance to be created
+  username: admin
+  password: jenkins_admin
+  ingress:
+    enabled: true
+    host: jenkins.example.com
+    annotations:
+      ingress.kubernetes.io/ssl-redirect: 'true'
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+  jobs:
+    baseImageUpdate:
+      # Defines a cron job for updating a customized product image using the corresponding latest base image
+      # Set to empty if a manual trigger of the Jenkins Job is expected is expected
+      # Refer to the Jenkins official documentation (https://www.jenkins.io/doc/book/pipeline/syntax/#cron-syntax) on how to set a cron
+      cron: '@daily'
+#    tls:
+#      - secretName: -tls
+#        hosts:
+#          - example.com
+
+# This section is used to configure access to the docker repository where Jenkins will push images to.
+registry:
+  server: 'https://index.docker.io/v1/'
+  username: <REGISTRY_USERNAME>
+  password: <REGISTRY_PASSWORD>
+  email: <REGISTRY_EMAIL>
+  address: index.docker.io
+
+# Github credentials
+# An access token could be used instead of the password for controlling access.
+github:
+  username: <GITHUB_USERNAME>
+  password: <GITHUB_PASSWORD>
+
+# Values for Spinnaker chart
+# Refer to https://github.com/helm/charts/blob/master/stable/spinnaker/values.yaml for more information on parameters.
+spinnaker:
+# Configure your Docker registries here to be used by Spinnaker
+#  dockerRegistries:
+#    - name: dockerhub
+#      address: index.docker.io
+#      username: <REGISTRY_USERNAME>
+#      password: <REGISTRY_PASSWORD>
+#      email: <REGISTRY_EMAIL>
+#      repositories:
+#        - org/repo
+  halyard:
+    additionalScripts:
+      create: true
+      data:
+        # This script is used to configure the Jenkins master with Spinnaker.
+        # USERNAME and PASSWORD should match the credentials given in the jenkins tag
+        enable_ci.sh: |-
+          echo "Configuring jenkins master"
+          USERNAME="admin"
+          PASSWORD="jenkins_admin"
+          $HAL_COMMAND config ci jenkins enable
+          echo $PASSWORD | $HAL_COMMAND config ci jenkins master edit master --address http://jenkins-service.{{ .Release.Namespace }}.svc.cluster.local:8080 --username $USERNAME --password || echo $PASSWORD | $HAL_COMMAND config ci jenkins master add master --address http://jenkins-service.{{ .Release.Namespace }}.svc.cluster.local:8080 --username $USERNAME --password
+          $HAL_COMMAND config features edit --pipeline-templates true
+  ingress:
+    enabled: true
+    host: spinnaker.example.com
+    annotations:
+      ingress.kubernetes.io/ssl-redirect: 'true'
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+#    tls:
+#      - secretName: -tls
+#        hosts:
+#          - example.com
+  ingressGate:
+    enabled: true
+    host: gate.spinnaker.example.com
+    annotations:
+      ingress.kubernetes.io/ssl-redirect: 'true'
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+#    tls:
+#     - secretName: -tls
+#       hosts:
+#         - example.com
+
+kibana:
+  nameOverride: "kibana"
+  elasticsearchHosts: "http://wso2-elasticsearch-master:9200"
+  ingress:
+    enabled: true
+    hosts:
+      - kibana.example.com
+#    tls:
+#      - hosts:
+#          - example.com
+#        secretName: -tls
+          
+elasticsearch:
+  minimumMasterNodes: 1
+  replicas: 1
+  imageTag: 7.8.1
+  clusterName: wso2-elasticsearch
+  persistence:
+    enabled: false
+  esJavaOpts: -Xms512m -Xmx512m
+
+prometheus-operator:
+  admissionWebhooks:
+    enabled: false
+    patch:
+      enabled: false
+  tlsProxy:
+    enabled: false
+  kubeEtcd: # Disable Etcd metrics
+    enabled: false
+  kubeControllerManager: #Disble KubeController Metrics
+    enabled: false
+  kubeScheduler: # Disable Scheduler metrics
+    enabled: false
+  alertmanager:  # Disable Alert Manager
+    enabled: false
+  kubeApiServer:
+    enabled: false
+  coreDns:
+    enabled: false
+  kubeProxy:
+    enabeld: false
+  grafana:
+    adminPassword: "admin"
+    ingress:
+      enabled: true
+      annotations: 
+        kubernetes.io/ingress.class: nginx
+      hosts:
+      - grafana.example.com
+#      tls:
+#        - hosts:
+#            - example.com
+#          secretName: -tls
+
+nodeExporter:
+  enabled: false
+kubeStateMetrics:
+    enabled: false
+
+prometheus-blackbox-exporter:
+  config: 
+    modules:
+      http_2xx:
+        prober: http
+        http:
+          tls_config:
+            insecure_skip_verify: true
